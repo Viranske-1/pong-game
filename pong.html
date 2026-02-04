@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>PONG GAME</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            background: radial-gradient(circle at top, #1b2735, #090a0f);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        .container {
+            text-align: center;
+            position: relative;
+        }
+
+        h1 {
+            letter-spacing: 4px;
+            margin-bottom: 6px;
+        }
+
+        .info {
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        canvas {
+            background: rgba(0, 0, 0, 0.85);
+            border-radius: 14px;
+            box-shadow: 0 0 30px #00ffff;
+        }
+
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            font-size: 26px;
+        }
+
+        .overlay button {
+            margin-top: 15px;
+            padding: 10px 25px;
+            font-size: 18px;
+            border-radius: 25px;
+            border: none;
+            background: #00ffff;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+            gap: 10px;
+        }
+
+        .btn {
+            width: 60px;
+            height: 40px;
+            border-radius: 20px;
+            background: #00ffff;
+            border: none;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>🚀 PONG GAME 🚀</h1>
+
+        <div class="info">
+            Score: <span id="score">0</span> |
+            High: <span id="high">0</span> |
+            Ball Speed: <span id="speedDisplay">0.5</span>
+        </div>
+
+        <canvas id="game" width="720" height="420"></canvas>
+
+        <div class="controls">
+            <button class="btn" id="upBtn">⬆</button>
+            <button class="btn" id="downBtn">⬇</button>
+            <button class="btn" onclick="changeBallSpeed(-0.1)">-</button>
+            <button class="btn" onclick="changeBallSpeed(0.1)">+</button>
+        </div>
+
+        <div class="overlay" id="askScreen">
+            <div>❌ YOU FAILED ❌</div>
+            <div style="margin-top:10px">Do you want to play again?</div>
+            <div>
+                <button onclick="restartGame()">YES</button>
+                <button onclick="stopGame()">NO</button>
+            </div>
+        </div>
+
+        <div class="overlay" id="stopScreen">
+            <div>🎮 GAME STOPPED</div>
+            <button onclick="startGame()">START GAME</button>
+        </div>
+    </div>
+
+    <script>
+        let canvas, ctx;
+        let upBtn, downBtn;
+
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem("pongHigh")) || 0;
+        let running = true;
+
+        let paddleW = 14, paddleH = 100;
+        let playerY, aiY;
+        let paddleSpeed = 3;
+
+        let ballX, ballY, ballVX, ballVY;
+        let ballR = 10;
+        let baseSpeed = 0.5; // starting speed
+        let speedMultiplier = 1; // dynamic speed factor
+
+        // Flickering yellow stars
+        let stars = [];
+
+        // Input
+        let up = false, down = false;
+
+        // Initialize game
+        function initGame() {
+            canvas = document.getElementById("game");
+            ctx = canvas.getContext("2d");
+
+            upBtn = document.getElementById("upBtn");
+            downBtn = document.getElementById("downBtn");
+
+            playerY = canvas.height / 2 - paddleH / 2;
+            aiY = playerY;
+
+            resetValues();
+            document.getElementById("high").textContent = highScore;
+
+            // Stars
+            stars = Array.from({ length: 120 }, () => ({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2 + 1,
+                alpha: Math.random(),
+                flickerSpeed: Math.random() * 0.03 + 0.01
+            }));
+
+            // Input events
+            document.addEventListener("keydown", e => {
+                if (e.key === "ArrowUp") up = true;
+                if (e.key === "ArrowDown") down = true;
+            });
+            document.addEventListener("keyup", e => {
+                if (e.key === "ArrowUp") up = false;
+                if (e.key === "ArrowDown") down = false;
+            });
+            upBtn.ontouchstart = () => up = true; upBtn.ontouchend = () => up = false;
+            downBtn.ontouchstart = () => down = true; downBtn.ontouchend = () => down = false;
+
+            drawLoop();
+        }
+
+        // Helper
+        function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+        // Draw flickering stars
+        function drawStars() {
+            stars.forEach(s => {
+                s.alpha += s.flickerSpeed;
+                if (s.alpha >= 1 || s.alpha <= 0) s.flickerSpeed *= -1;
+                ctx.fillStyle = `rgba(255,215,0,${s.alpha})`;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+                s.x -= 0.2;
+                if (s.x < 0) { s.x = canvas.width; s.y = Math.random() * canvas.height; }
+            });
+        }
+
+        // Reset game
+        function resetValues() {
+            score = 0;
+            ballX = canvas.width / 2;
+            ballY = canvas.height / 2;
+
+            let dirX = Math.random() < 0.5 ? -1 : 1;
+            let dirY = Math.random() < 0.5 ? -1 : 1;
+            let randomVY = (Math.random() * 0.5 + 0.2) * dirY;
+
+            ballVX = baseSpeed * speedMultiplier * dirX;
+            ballVY = randomVY;
+
+            document.getElementById("score").textContent = 0;
+            document.getElementById("speedDisplay").textContent = (baseSpeed * speedMultiplier).toFixed(2);
+            running = true;
+        }
+
+        function fail() {
+            running = false;
+
+            // Update high score if needed
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem("pongHigh", highScore);
+                document.getElementById("high").textContent = highScore;
+            }
+
+            document.getElementById("askScreen").style.display = "flex";
+        }
+
+        function restartGame() {
+            document.getElementById("askScreen").style.display = "none";
+            resetValues();
+        }
+
+        function stopGame() {
+            document.getElementById("askScreen").style.display = "none";
+            document.getElementById("stopScreen").style.display = "flex";
+        }
+
+        function startGame() {
+            document.getElementById("stopScreen").style.display = "none";
+            resetValues();
+        }
+
+        // Change ball speed
+        function changeBallSpeed(delta) {
+            speedMultiplier = Math.max(0.1, speedMultiplier + delta);
+            ballVX = Math.sign(ballVX) * baseSpeed * speedMultiplier;
+            ballVY = Math.sign(ballVY) * Math.abs(ballVY);
+            document.getElementById("speedDisplay").textContent = (baseSpeed * speedMultiplier).toFixed(2);
+        }
+
+        // Update positions
+        function update() {
+            if (!running) return;
+
+            if (up) playerY -= paddleSpeed;
+            if (down) playerY += paddleSpeed;
+            playerY = clamp(playerY, 0, canvas.height - paddleH);
+
+            ballX += ballVX;
+            ballY += ballVY;
+
+            if (ballY < ballR || ballY > canvas.height - ballR) ballVY *= -1;
+
+            // Player paddle collision
+            if (ballX <= paddleW + ballR && ballY > playerY && ballY < playerY + paddleH) {
+                ballVX *= -1;
+                ballVY += (Math.random() * 0.4 - 0.2);
+                score++;
+                document.getElementById("score").textContent = score;
+
+                // Update high score immediately
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem("pongHigh", highScore);
+                    document.getElementById("high").textContent = highScore;
+                }
+            }
+
+            if (ballX < 0) fail();
+
+            if (ballX > canvas.width) {
+                ballX = canvas.width / 2;
+                ballY = canvas.height / 2;
+                let dirY = Math.random() < 0.5 ? -1 : 1;
+                ballVX = -baseSpeed * speedMultiplier;
+                ballVY = (Math.random() * 0.5 + 0.2) * dirY;
+            }
+
+            // Simple AI
+            aiY += (ballY - (aiY + paddleH / 2)) * 0.05;
+            aiY = clamp(aiY, 0, canvas.height - paddleH);
+        }
+
+        // Draw everything
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawStars();
+
+            ctx.fillStyle = "#00ffff";
+            ctx.fillRect(0, playerY, paddleW, paddleH);
+
+            ctx.fillStyle = "#ff00ff";
+            ctx.fillRect(canvas.width - paddleW, aiY, paddleW, paddleH);
+
+            ctx.beginPath();
+            ctx.arc(ballX, ballY, ballR, 0, Math.PI * 2);
+            ctx.fillStyle = "#fff";
+            ctx.fill();
+        }
+
+        // Main loop
+        function drawLoop() {
+            update();
+            draw();
+            requestAnimationFrame(drawLoop);
+        }
+
+        window.onload = initGame;
+    </script>
+</body>
+
+</html>
